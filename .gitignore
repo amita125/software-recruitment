@@ -1,3 +1,13 @@
 .idea
 
 .DS_Store
+
+#  Ignore venv
+.my-env
+./my-env
+./my-env/**
+my-env/**
+my-env
+
+#  ignore pycache
+__pycache__
