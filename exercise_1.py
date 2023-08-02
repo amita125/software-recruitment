@@ -1,5 +1,5 @@
 from models import User
-from utilities import  convert_date_fields, get_data, is_active, save_data
+from utilities import check_email, convert_date_fields, get_data, is_active, save_data, update_data
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -7,18 +7,23 @@ app = Flask(__name__)
 # Define the date format
 date_format = "%d/%m/%Y"
 
+# Route to get all the users from the excel file
 @app.route('/users', methods=['GET'])
 def get_all_users():
-    return jsonify(get_data()),200
+    data = get_data()
+    return jsonify(data),200
 
+
+# Route to get the user by passing user id
 @app.route('/user/<int:user_id>', methods=['GET'])
 def get_user_by_id(user_id):
     data = get_data()
-    user = next((user for user in data if user['id'] == user_id), None)
+    user = next((user for user in data if user['id'] == user_id and is_active(user)), None)
     if not user:
         return jsonify({'message':'User not found'}),404
     return jsonify(user),200
 
+# Route to get the users by passing the primary trust
 @app.route('/trust/<string:trust>', methods=['GET'])
 def get_users_by_trust(trust):
     data = get_data()
@@ -40,6 +45,12 @@ def create_employee():
     data = get_data()
     new_user = request.json
 
+    # Check if the email is unique or not based on the excel file
+    existing_emails = {user['email'] for user in data}
+    if new_user['email'] in existing_emails:
+        return jsonify({'message': 'Email already exists. Please use a unique email address.'}), 400
+
+    
     # Get the required fields from the User model
     required_fields = [field for field, field_info in User.__fields__.items() if field_info.required]
     extra_fields = [field for field in new_user if field not in required_fields]
@@ -57,19 +68,29 @@ def create_employee():
             error_message += f'Extra fields: {extra_fields}.'
         return jsonify({'message': error_message}), 400
     
+    # Check if the date format is valid or not
     if all(key in new_user for key in ['start_date', 'end_date']):
         if not convert_date_fields(new_user, date_format):
             return jsonify({'message': 'Invalid date format. Expected format: dd/mm/yyyy.'}), 400
 
-
+    # Check the data types of the fields
     for field, value in new_user.items():
         expected_data_type = User.__fields__[field].type_
 
         if expected_data_type and not isinstance(value, expected_data_type):
             return jsonify({'message': f'Invalid data type for {field}. Expected {expected_data_type.__name__}.'}), 400
+
+    # Validate email format
+    if not check_email(new_user['email']):
+        return jsonify({'message': 'Invalid email format. Only @nhs. addresses are allowed.'}), 400
+    
+    #  Validate date comparison for start and end dates
+    if new_user['end_date'] < new_user['start_date']:
+            return jsonify({'message': 'end_date cannot be before start_date.'}), 400
    
     data.append(new_user)
     save_data(data)
+    update_data(data)
     return jsonify(new_user),201
 
 
@@ -89,12 +110,19 @@ def update_user(user_id):
     
     updated_record = request.json
 
-   
+    # Check if the new email is unique before updating the user's email
+    existing_emails = {user['email'] for user in data if user['id'] != user_id}
+    if 'email' in updated_record and updated_record['email'] in existing_emails and updated_record['email'] != existing_user['email']:
+        return jsonify({'message': 'Email already exists. Please use a unique email address.'}), 400
+
+    # Check the update fields are valid or not
+    
     whitelist_fields = [field for field, field_info in User.__fields__.items() if field_info.required]
     unwanted_fields = [field for field in updated_record if field not in whitelist_fields]
     if unwanted_fields:
         return jsonify({'message': f'Unwanted fields in update: {", ".join(unwanted_fields)}'}), 400
 
+    # Check the date format is valid or not
     if 'start_date' in updated_record or 'end_date' in updated_record:
         if not convert_date_fields(updated_record, date_format):
             return jsonify({'message': 'Invalid date format. Expected format: dd/mm/yyyy.'}), 400
@@ -124,11 +152,17 @@ def update_user(user_id):
 
     existing_user.update(updated_record)
     save_data(data)
+    update_data(data)
     return jsonify(existing_user),200
 
 @app.route('/user/<int:user_id>', methods=['DELETE'])
 def delete_user(user_id):
     data = get_data()
+    existing_user = next((user for user in data if user['id'] == user_id), None)
+
+    if not existing_user:
+        return jsonify({'message': f'No user found with the id {user_id}.'}), 404
+
     data = [item for item in data if item['id'] != user_id]
     save_data(data)
     return jsonify({'message': 'User deleted successfully'}), 200

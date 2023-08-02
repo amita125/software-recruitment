@@ -31,7 +31,10 @@ def is_active(user):
     end_date = pd.Timestamp(user['end_date']).date()
     return start_date <= today_date <= end_date
 
-
+# Helper function to check the user email 
+def check_email(email):
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@nhs\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?$'
+    return bool(re.match(email_pattern, email))
 
 # Helper function to check the start and end date for use in POST and PUT requests
 def convert_date_fields(data, date_format):
@@ -44,3 +47,9 @@ def convert_date_fields(data, date_format):
         return False
     return True
 
+
+#  Helper function to update the excel file contents
+def update_data(data):
+    df = pd.DataFrame(data)
+    df.to_excel(os.path.expanduser("exercise_1.xlsx"),
+                engine='openpyxl', index=False)
