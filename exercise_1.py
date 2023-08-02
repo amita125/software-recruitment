@@ -165,6 +165,7 @@ def delete_user(user_id):
 
     data = [item for item in data if item['id'] != user_id]
     save_data(data)
+    update_data(data)
     return jsonify({'message': 'User deleted successfully'}), 200
 
 
