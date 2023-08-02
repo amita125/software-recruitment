@@ -8,3 +8,6 @@
 ./my-env/**
 my-env/**
 my-env
+
+#  ignore pycache
+__pycache__
