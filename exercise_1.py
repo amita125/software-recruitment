@@ -1,7 +1,11 @@
-from utilities import get_data
+from models import User
+from utilities import  convert_date_fields, get_data, is_active, save_data
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+
+# Define the date format
+date_format = "%d/%m/%Y"
 
 @app.route('/users', methods=['GET'])
 def get_all_users():
@@ -18,10 +22,117 @@ def get_user_by_id(user_id):
 @app.route('/trust/<string:trust>', methods=['GET'])
 def get_users_by_trust(trust):
     data = get_data()
-    users = [user for user in data if user['primary_trust'] == trust]
+    users = [user for user in data if user['primary_trust'] == trust and is_active(user)]
     if not users:
         return jsonify({'message':'Users not found for the trust'}),404
     return jsonify(users),200
+
+
+# creating a user 
+# 1. new user should have the required field from the model 
+# 2. new user email should include the @nhs.
+# 3. new user email should be unique 
+# 4. new user should have the date formatted in '12/12/2023'
+# 5. new user should follow the user model data types
+
+@app.route('/user', methods=['POST'])
+def create_employee():
+    data = get_data()
+    new_user = request.json
+
+    # Get the required fields from the User model
+    required_fields = [field for field, field_info in User.__fields__.items() if field_info.required]
+    extra_fields = [field for field in new_user if field not in required_fields]
+
+    new_id = max(data, key=lambda x: x['id'])['id'] + 1
+    new_user['id'] = new_id
+
+    missing_fields = [field for field in required_fields if field not in new_user]
+
+    if missing_fields or extra_fields:
+        error_message = ""
+        if missing_fields:
+            error_message += f'Missing fields: {missing_fields}. '
+        if extra_fields:
+            error_message += f'Extra fields: {extra_fields}.'
+        return jsonify({'message': error_message}), 400
+    
+    if all(key in new_user for key in ['start_date', 'end_date']):
+        if not convert_date_fields(new_user, date_format):
+            return jsonify({'message': 'Invalid date format. Expected format: dd/mm/yyyy.'}), 400
+
+
+    for field, value in new_user.items():
+        expected_data_type = User.__fields__[field].type_
+
+        if expected_data_type and not isinstance(value, expected_data_type):
+            return jsonify({'message': f'Invalid data type for {field}. Expected {expected_data_type.__name__}.'}), 400
+   
+    data.append(new_user)
+    save_data(data)
+    return jsonify(new_user),201
+
+
+# Updating a user details 
+# 1. check the email is unique if provided 
+# 2. check the update fields are valid or not 
+# 3. check the date format is valid or not 
+# 4. check the user is present or not
+
+
+@app.route('/user/<int:user_id>', methods=['PUT'])
+def update_user(user_id):
+    data = get_data()
+    existing_user = next((user for user in data if user['id'] == user_id), None)
+    if not existing_user:
+        return jsonify({'message':'User not found'}),404
+    
+    updated_record = request.json
+
+   
+    whitelist_fields = [field for field, field_info in User.__fields__.items() if field_info.required]
+    unwanted_fields = [field for field in updated_record if field not in whitelist_fields]
+    if unwanted_fields:
+        return jsonify({'message': f'Unwanted fields in update: {", ".join(unwanted_fields)}'}), 400
+
+    if 'start_date' in updated_record or 'end_date' in updated_record:
+        if not convert_date_fields(updated_record, date_format):
+            return jsonify({'message': 'Invalid date format. Expected format: dd/mm/yyyy.'}), 400
+
+    # Check if user wants to update start_date but not end_date
+    if 'start_date' in updated_record and 'end_date' not in updated_record:
+        # If 'end_date' is not present in the updated_record, retain the existing 'end_date'
+        updated_record['end_date'] = existing_user['end_date']
+
+    # Check if user wants to update end_date but not start_date
+    elif 'end_date' in updated_record and 'start_date' not in updated_record:
+        # If 'start_date' is not present in the updated_record, retain the existing 'start_date'
+        updated_record['start_date'] = existing_user['start_date']
+    
+
+    #  Validate date comparison for start and end dates
+    if updated_record['end_date'] < updated_record['start_date']:
+            return jsonify({'message': 'end_date cannot be before start_date.'}), 400
+
+    # Validate data types and date format of updated fields
+    for field, value in updated_record.items():
+        expected_data_type = User.__fields__[field].type_
+
+        if expected_data_type and not isinstance(value, expected_data_type):
+            return jsonify({'message': f'Invalid data type for {field}. Expected {expected_data_type.__name__}.'}), 400
+    
+
+    existing_user.update(updated_record)
+    save_data(data)
+    return jsonify(existing_user),200
+
+@app.route('/user/<int:user_id>', methods=['DELETE'])
+def delete_user(user_id):
+    data = get_data()
+    data = [item for item in data if item['id'] != user_id]
+    save_data(data)
+    return jsonify({'message': 'User deleted successfully'}), 200
+
 
 if __name__ == '__main__':
     app.run()
